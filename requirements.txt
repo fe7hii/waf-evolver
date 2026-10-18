@@ -1,0 +1,8 @@
+requests>=2.31.0
+flask>=3.0.0
+
+# Opsiyonel - dynamic XSS dogrulama (Playwright ile gercek tarayicida
+# JS execution kaniti) icin gerekli. Kurulu degilse sistem otomatik
+# olarak static (regex tabanli) dogrulamaya duser, hata vermez.
+# Kurulum: pip install playwright && python3 -m playwright install chromium
+# playwright>=1.40.0

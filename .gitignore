@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtualenvs
+.venv/
+venv/
+pwvenv/
+env/
+
+# Runtime logs / learned state / reports (keep the dir, not its contents)
+logs/*
+!logs/.gitkeep
+
+# Generated artifacts
+*_qtable.json
+*_profile.json
+waf_bypass_tamper.py
+report.md
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
