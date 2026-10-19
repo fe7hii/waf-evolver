@@ -32,7 +32,7 @@ _VALID_EVENT_HANDLER = re.compile(
     r"<\s*[a-z][a-z0-9]*\b[^>]*\bon[a-z]+\s*=\s*['\"]?[^'\">]+", re.IGNORECASE
 )
 _VALID_JAVASCRIPT_URI = re.compile(
-    r"(?:href|src)\s*=\s*['\"]?\s*javascript:", re.IGNORECASE
+    r"(?:href|src|formaction)\s*=\s*['\"]?\s*javascript:[^'\">]*"
 )
 _VALID_SVG_ONLOAD = re.compile(
     r"<\s*svg\b[^>]*\bonload\s*=", re.IGNORECASE

