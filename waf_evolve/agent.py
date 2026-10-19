@@ -5,8 +5,8 @@ operator yields higher fitness, conditioned on a STATE (e.g. the category
 and the current best response bucket), so it can learn rules like "when
 blocked, try operator Y" rather than a single global ranking.
 """
-import random
 import json
+import random
 from pathlib import Path
 
 

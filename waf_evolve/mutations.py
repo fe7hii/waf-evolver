@@ -8,7 +8,6 @@ they are selected and applied randomly/evolutionarily.
 """
 import random
 import re
-import string
 import urllib.parse
 
 

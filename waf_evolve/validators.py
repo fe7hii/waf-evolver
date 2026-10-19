@@ -11,10 +11,9 @@ Three levels:
 3. DYNAMIC - for XSS, renders in a real headless Chromium and observes an
    actual JS dialog firing (requires Playwright).
 """
-import re
-import time
 import difflib
 import logging
+import re
 import urllib.parse
 
 logger = logging.getLogger("waf_evolve.validators")

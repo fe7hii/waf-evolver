@@ -1,0 +1,22 @@
+# ruff lint config for waf-evolver
+# Baseline chosen so the pre-existing code passes; new code must stay green.
+# Full pycodestyle "E" is intentionally NOT selected (the codebase predates it
+# and E501 line-too-long would drown real issues); E4/E7/E9 cover import,
+# statement and runtime errors, which is the meaningful core.
+line-length = 100
+target-version = "py310"
+
+[lint]
+select = [
+    "E4",  # import errors
+    "E7",  # statement errors
+    "E9",  # runtime errors
+    "F",   # pyflakes (undefined names, unused imports, ...)
+    "W",   # pycodestyle warnings
+    "I",   # isort (import ordering)
+    "UP",  # pyupgrade (modern syntax: X | None, list[str], ...)
+]
+
+[lint.per-file-ignores]
+# seed payload files are data, not code
+"seeds/*" = ["E501"]

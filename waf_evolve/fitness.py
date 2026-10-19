@@ -6,12 +6,10 @@ active boolean/time confirmation when a prober is available), not from merely
 not being blocked. Over-encoded payloads are penalized because they bypass
 the filter without reaching the backend as an attack.
 """
-from dataclasses import dataclass
-from typing import Optional
 import urllib.parse
+from dataclasses import dataclass
 
 from . import validators
-
 
 WAF_BLOCK_SIGNATURES = [
     "access denied", "request blocked", "security violation",
@@ -33,7 +31,7 @@ class FitnessResult:
     status_code: int
     blocked: bool
     reason: str
-    validated: Optional[bool] = None
+    validated: bool | None = None
 
 
 def _encoding_depth(payload: str) -> int:

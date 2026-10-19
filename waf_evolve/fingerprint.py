@@ -5,8 +5,8 @@ malicious request, then matches response headers / block-page body against
 known signatures. The detected product is used to seed the RL agent with
 operator priors known to help against that WAF.
 """
-import re
 import logging
+import re
 
 logger = logging.getLogger("waf_evolve.fingerprint")
 
