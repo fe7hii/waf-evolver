@@ -285,6 +285,15 @@ def check_sql_signatures():
         assert ok_db, f"validate_sqli should accept a real {label} error"
     no, _reason = validate_sqli("all good, 200 ok")
     assert not no, "validate_sqli should reject harmless text"
+    # false-positive guards for two deliberately-narrowed patterns: a prose
+    # sentence containing the ADO.NET phrase prefix is not an error, and
+    # SQLCODE=0 is DB2 success, not a failure (only non-zero codes are errors).
+    for harmless in (
+        "this page discusses the underlying provider failed on an error",
+        "SQLCODE=0 means no error in DB2",
+    ):
+        fp, _reason = validate_sqli(harmless)
+        assert not fp, f"validate_sqli false-positive on {harmless!r}"
     return len(SQL_ERROR_SIGNATURES)
 
 

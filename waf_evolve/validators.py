@@ -282,10 +282,10 @@ SQL_ERROR_SIGNATURES = [
     re.compile(r"string or binary conversion failed", re.IGNORECASE),
     re.compile(r"incorrect syntax near", re.IGNORECASE),
     re.compile(r"arithmetic overflow error converting", re.IGNORECASE),
-    re.compile(r"the underlying provider failed on an", re.IGNORECASE),
+    re.compile(r"the underlying provider failed on (?:an )?open", re.IGNORECASE),
     # DB2: "DB2 SQL Error: SQLCODE=-NNN, SQLSTATE=..." and "SQLNNNNn/w/a ..."
     re.compile(r"DB2 SQL Error", re.IGNORECASE),
-    re.compile(r"SQLCODE\s*=\s*-?\d+", re.IGNORECASE),
+    re.compile(r"SQLCODE\s*=\s*[+-]?\d*[1-9]\d*", re.IGNORECASE),
     re.compile(r"SQL\d{4}[NWA]", re.IGNORECASE),
     # MariaDB / MySQL: "The MariaDB server is running with version ..."
     re.compile(r"(?:mysql|maria)\w* server is running with version", re.IGNORECASE),
