@@ -17,7 +17,11 @@ is dead, broken or internally inconsistent:
   * a SQL-error or LFI-file signature matches nothing in the realistic corpus
     (i.e. it is dead or typo'd);
   * the static XSS validator neither accepts a known-good reflection nor
-    rejects known-harmless text.
+    rejects known-harmless text;
+  * the time-based SQLi sibling generator (_make_time_siblings) does not
+    produce the exact (fast, slow) probe pair for sleep/pg_sleep, MSSQL
+    WAITFOR DELAY and MySQL BENCHMARK, or fails to return None when no time
+    construct is present.
 
 On success it prints "SMOKE OK (...)" and exits 0.
 """
@@ -50,6 +54,7 @@ from waf_evolve.mutations import (
 from waf_evolve.validators import (
     KNOWN_FILE_SIGNATURES,
     SQL_ERROR_SIGNATURES,
+    _make_time_siblings,
     validate_lfi,
     validate_sqli,
     validate_xss_static,
@@ -77,6 +82,15 @@ SQL_ERROR_CORPUS = [
     'An exception occurred: near "WHERE": syntax error',
     "Unclosed quotation mark after the expression 'admin'.",
     "quoted string not properly terminated",
+    "Msg 102, Level 15, State 1, Line 1: Incorrect syntax near ''admin''.",
+    "Incorrect syntax near the keyword 'WHERE'.",
+    "Conversion failed when converting the nvarchar value 'abc' using input data.",
+    "String or binary conversion failed in the query between Operator and Column.",
+    "Arithmetic overflow error converting expression to data type int.",
+    "The underlying provider failed on an open connection.",
+    "DB2 SQL Error: SQLCODE=-204, SQLSTATE=42703, SQLERRMC=users.",
+    "SQL0734N The string variable users is not defined.",
+    "The MariaDB server is running with version 10.5.8-MariaDB-1:1:1",
 ]
 
 LFI_CORPUS = {
@@ -84,6 +98,36 @@ LFI_CORPUS = {
     "/etc/shadow": ["root:$6$xyz$abcdefghijklmnop"],
     "win.ini": ["[fonts]", "[extensions]"],
     "php_source": ["<?php echo 1;", "<?= date('Y')"],
+    "boot.ini": [
+        "[boot loader]",
+        "timeout=30",
+        "default=multi(0)disk(0)rdisk(0)partition(1)\\WINDOWS",
+        "[operating systems]",
+        "multi(0)disk(0)rdisk(0)partition(1)\\WINDOWS=\"Microsoft Windows XP Professional\"=ntoskrnl.exe /noexecute=auto /detecthal",
+    ],
+    "/etc/os-release": [
+        "NAME=\"Ubuntu\"",
+        "VERSION=\"22.04.4 LTS (Jammy Jellyfish)\"",
+        "ID=ubuntu",
+        "ID_LIKE=debian",
+        "PRETTY_NAME=\"Ubuntu 22.04.4 LTS\"",
+        "VERSION_ID=\"22.04.4\"",
+        "HOME_URL=\"https://ubuntu.com/\"",
+    ],
+    "wp-config.php": [
+        "<?php // ** Database settings ** //",
+        "define( 'DB_NAME', 'wordpress' );",
+        "define( 'DB_USER', 'wp_admin' );",
+        "define( 'DB_PASSWORD', 'Sup3rS3cret!' );",
+        "define( 'DB_HOST', 'localhost' );",
+    ],
+    "web.config": [
+        "<configuration>",
+        "  <connectionStrings>",
+        "    <add name=\"AppConn\" connectionString=\"Data Source=.;Initial Catalog=appdb;Integrated Security=True\" providerName=\"System.Data.SqlClient\" />",
+        "  </connectionStrings>",
+        "</configuration>",
+    ],
 }
 
 # Deterministic operators pinned to exact input -> output so a behavior change
@@ -229,6 +273,16 @@ def check_sql_signatures():
         assert hits, f"SQL signature {pat.pattern!r} matches no corpus line (dead?)"
     ok, _reason = validate_sqli(SQL_ERROR_CORPUS[0])
     assert ok, "validate_sqli should accept a known SQL error"
+    # explicit positive pins for the MSSQL / DB2 signature families: the
+    # per-pattern dead-check above only proves each regex can fire on some
+    # line, these prove validate_sqli accepts a real MSSQL and a real DB2
+    # error end-to-end.
+    mssql_line = "Msg 102, Level 15, State 1, Line 1: Incorrect syntax near ''admin''."
+    db2_line = "DB2 SQL Error: SQLCODE=-204, SQLSTATE=42703, SQLERRMC=users."
+    for line, label in ((mssql_line, "MSSQL"), (db2_line, "DB2")):
+        assert line in SQL_ERROR_CORPUS, f"corpus lost the {label} pin line"
+        ok_db, _reason = validate_sqli(line)
+        assert ok_db, f"validate_sqli should accept a real {label} error"
     no, _reason = validate_sqli("all good, 200 ok")
     assert not no, "validate_sqli should reject harmless text"
     return len(SQL_ERROR_SIGNATURES)
@@ -242,9 +296,48 @@ def check_lfi_signatures():
             assert hits, f"LFI signature [{file_hint}] {pat.pattern!r} matches no corpus line (dead?)"
     ok, _reason = validate_lfi("root:x:0:0:root:/root:/bin/bash")
     assert ok, "validate_lfi should accept /etc/passwd content"
+    # explicit positive pins for all four new file families: the per-pattern
+    # dead-check above only proves each regex can fire on some line, these
+    # prove validate_lfi accepts a real line of each new file end-to-end
+    # (wp-config.php pinned without any <?php so the define() regex is the
+    # match, not the php_source family).
+    ok_boot, _reason = validate_lfi("[boot loader]")
+    assert ok_boot, "validate_lfi should accept boot.ini content"
+    ok_os, _reason = validate_lfi('PRETTY_NAME="Ubuntu 22.04.4 LTS"')
+    assert ok_os, "validate_lfi should accept /etc/os-release content"
+    ok_wp, _reason = validate_lfi("define( 'DB_NAME', 'wordpress' );")
+    assert ok_wp, "validate_lfi should accept wp-config.php content"
+    ok_web, _reason = validate_lfi("<connectionStrings>")
+    assert ok_web, "validate_lfi should accept web.config content"
     no, _reason = validate_lfi("nothing interesting here")
     assert not no, "validate_lfi should reject harmless text"
     return len(KNOWN_FILE_SIGNATURES)
+
+
+def check_time_siblings():
+    """Byte-for-byte pins on _make_time_siblings: the time-based active
+    confirmation only works if the (fast, slow) probe pair differs exactly in
+    the time cost. Pin all three constructs: sleep/pg_sleep (incl. the inner
+    sleep of BENCHMARK(N, SLEEP(x))), MSSQL WAITFOR DELAY, and the BENCHMARK
+    iteration-count differential; a payload without a time construct must
+    still return None."""
+    pins = [
+        # MSSQL WAITFOR DELAY clause rewrite
+        ("x' WAITFOR DELAY '0:0:5' --",
+         ("x' WAITFOR DELAY '0:0:0' --", "x' WAITFOR DELAY '0:0:3' --")),
+        # BENCHMARK(N, SLEEP(x)) must keep going through the inner-sleep path
+        ("x' BENCHMARK(1000000, SLEEP(5)) --",
+         ("x' BENCHMARK(1000000, SLEEP(0)) --", "x' BENCHMARK(1000000, SLEEP(3)) --")),
+        # BENCHMARK without an inner sleep: N-differential
+        ("x' BENCHMARK(100, MD5(1)) --",
+         ("x' BENCHMARK(1, MD5(1)) --", "x' BENCHMARK(10000000, MD5(1)) --")),
+        # no time construct at all
+        ("1 AND 1=1", None),
+    ]
+    for inp, expected in pins:
+        got = _make_time_siblings(inp)
+        assert got == expected, f"_make_time_siblings({inp!r}) = {got!r}, expected {expected!r}"
+    return len(pins)
 
 
 def check_xss_static():
@@ -279,12 +372,13 @@ def main():
     n_waf = check_fingerprints()
     n_sql = check_sql_signatures()
     n_lfi = check_lfi_signatures()
+    n_time = check_time_siblings()
     n_xss = check_xss_static()
     n_xss_vec = check_xss_vector_coverage()
     print(
         f"SMOKE OK ({n_ops} operators, {n_waf} fingerprints, "
-        f"{n_sql} sqli-signatures, {n_lfi} lfi-files, {n_xss} xss-check, "
-        f"{n_xss_vec} xss-vectors-covered)"
+        f"{n_sql} sqli-signatures, {n_lfi} lfi-files, {n_time} time-siblings, "
+        f"{n_xss} xss-check, {n_xss_vec} xss-vectors-covered)"
     )
     return 0
 

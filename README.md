@@ -182,8 +182,11 @@ over the query, not just that an error was triggered:
   sends both, and confirms only if the two responses differ in a controlled,
   logic-dependent way. If the payload was not actually injected, both siblings
   return the same page, so it is correctly rejected (no false positive).
-- **Time-based blind:** if the payload carries a `sleep()`/`pg_sleep()`, it
-  sends a `sleep(0)` vs `sleep(3)` pair and confirms only if the response time
+- **Time-based blind:** if the payload carries a time construct -
+  `sleep()`/`pg_sleep()`, MSSQL `WAITFOR DELAY 'h:m:s'`, or MySQL
+  `BENCHMARK(N, ...)` - it sends a matched fast/slow pair (e.g. `sleep(0)`
+  vs `sleep(3)`, `WAITFOR DELAY '0:0:0'` vs `'0:0:3'`, or `BENCHMARK(1, ...)`
+  vs `BENCHMARK(10000000, ...)`) and confirms only if the response time
   shifts by the expected margin.
 
 If neither applies, it falls back to error-signature detection.
@@ -304,8 +307,8 @@ Use the `--category` flag to enable strict, category-specific validation:
 | Category | Validation |
 |---|---|
 | `xss` | Checks for a **real, closing, valid** `<script>` tag, an `onXXX=` event handler, a `javascript:` URI, or `<svg onload>`. Appearing as text is not enough. |
-| `lfi` | Checks for the **actual content signature** of known files (e.g. `root:x:0:0:` for `/etc/passwd`). A reflected path (e.g. a "file not found: X" message) is not enough. |
-| `sqli` | Looks for a real SQL error message / engine signature (MySQL, PostgreSQL, Oracle, SQLite). |
+| `lfi` | Checks for the **actual content signature** of known files (`/etc/passwd`, `/etc/shadow`, `/etc/os-release`, `win.ini`, `boot.ini`, WordPress `wp-config.php`, IIS `web.config`, PHP source). A reflected path (e.g. a "file not found: X" message) is not enough. |
+| `sqli` | Looks for a real SQL error message / engine signature (MySQL, MariaDB, PostgreSQL, Oracle, SQLite, MSSQL, DB2). |
 | `generic` (default) | No specific validation (score-based only). |
 
 Use `--no-require-validation` to disable this requirement (not recommended -
