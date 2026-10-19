@@ -21,7 +21,9 @@ is dead, broken or internally inconsistent:
   * the time-based SQLi sibling generator (_make_time_siblings) does not
     produce the exact (fast, slow) probe pair for sleep/pg_sleep, MSSQL
     WAITFOR DELAY and MySQL BENCHMARK, or fails to return None when no time
-    construct is present.
+    construct is present;
+  * a seed corpus file no longer loads through the real cli.load_seeds,
+    contains blank/padded/duplicate lines, or shrinks below its floor.
 
 On success it prints "SMOKE OK (...)" and exits 0.
 """
@@ -144,6 +146,15 @@ DETERMINISTIC_PINS = {
 # Static XSS reflection the validator must accept / reject.
 XSS_GOOD = ("User: <script>alert(1)</script> done", "<script>alert(1)</script>")
 XSS_BAD = ("User: <b>bold</b> done", "<script>alert(1)</script>")
+
+# Seed corpus floors: the payload counts before the seed expansion. A trim
+# that drops a file below its original corpus size is caught even when every
+# other check passes.
+SEED_FLOORS = {
+    "sqli_seeds.txt": 10,
+    "xss_seeds.txt": 17,
+    "lfi_seeds.txt": 8,
+}
 
 
 class _FakeResponse:
@@ -349,6 +360,37 @@ def check_time_siblings():
     return len(pins)
 
 
+def check_seeds():
+    """The GA starts from seeds/*.txt loaded through cli.load_seeds, so the
+    corpus shape is part of the contract: every file must load through the
+    real loader, carry exactly one unpadded payload per line (no blanks, no
+    duplicates), and never shrink below its pre-expansion floor."""
+    from cli import load_seeds
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    total = 0
+    for name, floor in SEED_FLOORS.items():
+        path = os.path.join(repo_root, "seeds", name)
+        with open(path) as f:
+            raw = f.read().splitlines()
+        assert raw, f"seeds/{name} is empty"
+        assert all(line for line in raw), f"seeds/{name} has blank lines"
+        assert all(line == line.strip() for line in raw), (
+            f"seeds/{name} has padded lines (load_seeds would mask them)"
+        )
+        payloads = load_seeds(path)
+        assert len(payloads) == len(raw), (
+            f"seeds/{name}: loader kept {len(payloads)} of {len(raw)} lines"
+        )
+        dupes = sorted({p for p in payloads if payloads.count(p) > 1})
+        assert not dupes, f"seeds/{name} has duplicate payloads: {dupes}"
+        assert len(payloads) >= floor, (
+            f"seeds/{name} shrank to {len(payloads)} payloads (floor {floor})"
+        )
+        total += len(payloads)
+    return total
+
+
 def check_xss_static():
     good_text, payload = XSS_GOOD
     ok, _reason = validate_xss_static(good_text, payload)
@@ -384,10 +426,11 @@ def main():
     n_time = check_time_siblings()
     n_xss = check_xss_static()
     n_xss_vec = check_xss_vector_coverage()
+    n_seeds = check_seeds()
     print(
         f"SMOKE OK ({n_ops} operators, {n_waf} fingerprints, "
         f"{n_sql} sqli-signatures, {n_lfi} lfi-files, {n_time} time-siblings, "
-        f"{n_xss} xss-check, {n_xss_vec} xss-vectors-covered)"
+        f"{n_xss} xss-check, {n_xss_vec} xss-vectors-covered, {n_seeds} seeds)"
     )
     return 0
 
