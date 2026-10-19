@@ -130,6 +130,25 @@ def _craft_response(sig):
     return _FakeResponse(headers, text=text)
 
 
+# Real-world single-signature responses for the products whose secondary
+# signals the craft-based check (which only exercises sig["headers"][0]) does
+# not cover: multi-word `server:` values (GCP "Google Frontend"), `via:` hop
+# strings (Varnish, KeyCDN), and block cookies (PerimeterX pxhid, DataDome).
+# Making fingerprint_waf re-detect each from its real signal is a permanent
+# tripwire on the real detection path, not just the crafted one.
+REALISTIC_WAF_RESPONSES = {
+    "Bunny.net": {"server": "BunnyCDN"},
+    "Fastly": {"x-fastly-request-id": "d41d8cd9"},
+    "Varnish": {"via": "1.1 varnish"},
+    "PerimeterX/HUMAN": {"set-cookie": "pxhid=abc123; Path=/; HttpOnly"},
+    "DataDome": {"set-cookie": "datadome=abc123; Path=/"},
+    "Wallarm": {"x-wallarm": "1"},
+    "GCP/Cloud Armor": {"server": "Google Frontend"},
+    "KeyCDN": {"via": "1.1 keycdn"},
+    "Radware/LinkDDoS": {"server": "Radware"},
+}
+
+
 def check_operators():
     all_names = {op.__name__ for op in ALL_MUTATIONS}
     for category, payload in SAMPLE_PAYLOAD.items():
@@ -185,6 +204,15 @@ def check_fingerprints():
         detected, _detail = fingerprint_waf(lambda _p, _r=resp: _r)
         assert detected == product, (
             f"fingerprint: crafted {product} response detected as {detected!r}"
+        )
+    # real-world single-signature responses (secondary signals the craft check
+    # does not exercise: multi-word server values, via hops, block cookies)
+    for product, headers in REALISTIC_WAF_RESPONSES.items():
+        assert product in WAF_SIGNATURES, f"realistic response for unknown {product!r}"
+        resp = _FakeResponse(headers)
+        detected, _detail = fingerprint_waf(lambda _p, _r=resp: _r)
+        assert detected == product, (
+            f"fingerprint: realistic {product} response detected as {detected!r}"
         )
     # operator-prior consistency: every prior product has a signature, and
     # every referenced operator is a real operator
