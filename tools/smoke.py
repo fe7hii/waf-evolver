@@ -36,8 +36,13 @@ from waf_evolve.fingerprint import (
 from waf_evolve.mutations import (
     ALL_MUTATIONS,
     OPERATORS_BY_CATEGORY,
+    backslash_insert_sql,
     crossover,
+    gbk_overlong,
     operators_for,
+    overlong_utf8,
+    sql_hex_string_literal,
+    uri_case_fold,
 )
 from waf_evolve.validators import (
     KNOWN_FILE_SIGNATURES,
@@ -143,6 +148,27 @@ def check_operators():
     return len(all_names)
 
 
+def check_evasion_pins():
+    """Exact input->output pins for the deterministic SQLi/LFI evasion
+    operators (overlong UTF-8/GBK, backslash insertion, hex string literal,
+    percent-encoding case fold)."""
+    pins = [
+        (overlong_utf8, "a b'c", "a%c0%a0b%c0%a7c"),
+        (gbk_overlong, "a' b", "a%df%27%df%20b"),
+        (backslash_insert_sql, "x = 1", "x\\ \\=\\ 1"),
+        (sql_hex_string_literal, "'admin'", "0x61646d696e"),
+        # degenerate inputs: only matched pairs rewrite, no corruption
+        (sql_hex_string_literal, "'a'b'", "0x61b'"),
+        (sql_hex_string_literal, "admin", "admin"),
+        (sql_hex_string_literal, "''", "0x"),
+        (uri_case_fold, "a%2Fb%3Dc", "a%2fb%3dc"),
+    ]
+    for fn, inp, expected in pins:
+        got = fn(inp)
+        assert got == expected, f"{fn.__name__}({inp!r}) = {got!r}, expected {expected!r}"
+    return len(pins)
+
+
 def check_fingerprints():
     all_op_names = {op.__name__ for op in ALL_MUTATIONS}
     for product, sig in WAF_SIGNATURES.items():
@@ -196,6 +222,7 @@ def check_xss_static():
 
 def main():
     n_ops = check_operators()
+    check_evasion_pins()
     n_waf = check_fingerprints()
     n_sql = check_sql_signatures()
     n_lfi = check_lfi_signatures()

@@ -46,14 +46,19 @@ WAF_SIGNATURES = {
 WAF_OPERATOR_PRIORS = {
     "ModSecurity/OWASP CRS": [
         "add_sql_comment", "sql_inline_comment_split", "whitespace_alt",
-        "case_randomize", "mysql_versioned_comment",
+        "case_randomize", "mysql_versioned_comment", "overlong_utf8",
+        "gbk_overlong", "backslash_insert_sql", "sql_hex_string_literal",
+        "uri_case_fold",
     ],
-    "Cloudflare": ["case_randomize", "whitespace_alt", "unicode_homoglyph", "url_encode_partial"],
+    "Cloudflare": [
+        "case_randomize", "whitespace_alt", "unicode_homoglyph", "url_encode_partial",
+        "overlong_utf8", "gbk_overlong", "uri_case_fold",
+    ],
     "Akamai": ["whitespace_alt", "case_randomize", "double_url_encode"],
     "Imperva/Incapsula": ["case_randomize", "add_sql_comment", "unicode_homoglyph"],
-    "F5 BIG-IP ASM": ["whitespace_alt", "case_randomize", "url_encode_partial"],
+    "F5 BIG-IP ASM": ["whitespace_alt", "case_randomize", "url_encode_partial", "backslash_insert_sql"],
     "Sucuri": ["case_randomize", "add_sql_comment"],
-    "AWS WAF": ["whitespace_alt", "case_randomize", "mysql_versioned_comment"],
+    "AWS WAF": ["whitespace_alt", "case_randomize", "mysql_versioned_comment", "overlong_utf8", "sql_hex_string_literal"],
 }
 
 

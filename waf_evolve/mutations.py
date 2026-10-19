@@ -220,6 +220,52 @@ def sql_inline_comment_split(payload: str) -> str:
     return payload.replace(" ", "/**/", 1) if " " in payload else payload
 
 
+def overlong_utf8(payload: str) -> str:
+    """Overlong UTF-8 for space (-> %c0%a0) and single-quote (-> %c0%a7).
+
+    The two-byte overlong forms decode to 0x20 (space) and 0x27 (quote)
+    respectively; byte-oriented signature rules that only match the
+    single-byte form let them through while the server reassembles the
+    original byte.
+    """
+    return payload.replace(" ", "%c0%a0").replace("'", "%c0%a7")
+
+
+def gbk_overlong(payload: str) -> str:
+    """GBK multi-byte for space (-> %df%20) and single-quote (-> %df%27).
+
+    0xdf is a valid GBK lead byte (0x81-0xFE); a server decoding a
+    GBK/GB18030 parameter reads lead+trail as one character, so %df%27
+    hides the quote from byte-oriented rules while the query still parses.
+    """
+    return payload.replace(" ", "%df%20").replace("'", "%df%27")
+
+
+def backslash_insert_sql(payload: str) -> str:
+    """Insert a backslash before SQL structural chars (space, =, <, >, (, ), ')."""
+    structural = " =<>()'"
+    return "".join(("\\" + ch) if ch in structural else ch for ch in payload)
+
+
+def sql_hex_string_literal(payload: str) -> str:
+    """Rewrite each single-quoted literal as a 0x-hex blob (quotes dropped).
+
+    Only matched single-quoted pairs are rewritten; a trailing/unmatched
+    quote (degenerate input) is left untouched, so the operator never
+    corrupts the byte stream. In MySQL 0x<hex> is a BINARY literal equal
+    to the original string bytes, so comparisons still match while
+    quoted-string/keyword signatures miss it.
+    """
+    def _hex(m: "re.Match[str]") -> str:
+        return "0x" + "".join(f"{ord(c):02x}" for c in m.group(1))
+    return re.sub(r"'([^']*)'", _hex, payload)
+
+
+def uri_case_fold(payload: str) -> str:
+    """Fold %XX to lowercase hex for case-sensitive percent-encoding rules."""
+    return re.sub(r"%[0-9A-Fa-f]{2}", lambda m: "%" + m.group(0)[1:].lower(), payload)
+
+
 ALL_MUTATIONS = [
     case_randomize,
     add_sql_comment,
@@ -243,6 +289,11 @@ ALL_MUTATIONS = [
     lfi_encode_traversal,
     lfi_double_encode_traversal,
     lfi_depth_vary,
+    overlong_utf8,
+    gbk_overlong,
+    backslash_insert_sql,
+    sql_hex_string_literal,
+    uri_case_fold,
 ]
 
 
@@ -251,19 +302,21 @@ OPERATORS_BY_CATEGORY = {
         case_randomize, add_whitespace_variants, insert_random_junk,
         html_entity_encode, url_encode_partial, script_null_byte_split,
         xss_event_handler_swap, xss_tag_vector_swap, xss_attr_breakout,
-        xss_entity_obfuscate,
+        xss_entity_obfuscate, uri_case_fold,
     ],
     "sqli": [
         case_randomize, add_sql_comment, add_whitespace_variants,
         url_encode_partial, insert_random_junk, unicode_homoglyph,
         script_null_byte_split, add_null_byte, double_url_encode,
         strip_and_reencode, mysql_versioned_comment, whitespace_alt,
-        sql_inline_comment_split,
+        sql_inline_comment_split, overlong_utf8, gbk_overlong,
+        backslash_insert_sql, sql_hex_string_literal, uri_case_fold,
     ],
     "lfi": [
         lfi_nested_traversal, lfi_encode_traversal, lfi_double_encode_traversal,
         lfi_depth_vary, url_encode_partial, add_null_byte, case_randomize,
-        insert_random_junk, strip_and_reencode,
+        insert_random_junk, strip_and_reencode, overlong_utf8, gbk_overlong,
+        uri_case_fold,
     ],
     "generic": ALL_MUTATIONS,
 }
