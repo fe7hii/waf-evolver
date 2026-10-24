@@ -1,11 +1,6 @@
-from .engine import WAFEvolver, EvolveConfig
+from . import fingerprint, fitness, mutations, report, tamper_export, validators
 from .agent import MutationAgent
-from . import mutations
-from . import fitness
-from . import validators
-from . import fingerprint
-from . import tamper_export
-from . import report
+from .engine import EvolveConfig, WAFEvolver
 
 __all__ = ["WAFEvolver", "EvolveConfig", "MutationAgent", "mutations", "fitness",
            "validators", "fingerprint", "tamper_export", "report"]

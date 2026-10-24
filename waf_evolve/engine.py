@@ -11,24 +11,21 @@ request jitter + browser-like User-Agent, and post-success minimization.
 
 Use ONLY against targets you are authorized to test.
 """
-import time
-import random
 import json
 import logging
+import random
 import statistics
-from pathlib import Path
+import time
 from dataclasses import dataclass, field
-from typing import List, Optional
+from pathlib import Path
 
 import requests
 
-from . import mutations
 from . import fingerprint as fp
-from . import tamper_export
-from .fitness import calculate_fitness, FitnessResult
+from . import mutations, tamper_export
 from .agent import MutationAgent
+from .fitness import FitnessResult, calculate_fitness
 from .validators import BrowserSession
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -57,9 +54,9 @@ class Individual:
     payload: str
     fitness: float = 0.0
     reason: str = ""
-    status_code: Optional[int] = None
-    validated: Optional[bool] = None
-    source_op: Optional[str] = None
+    status_code: int | None = None
+    validated: bool | None = None
+    source_op: str | None = None
 
 
 @dataclass
@@ -74,7 +71,7 @@ class EvolveConfig:
     success_threshold: float = 60.0
     use_rl_agent: bool = False
     extra_headers: dict = field(default_factory=dict)
-    log_file: Optional[str] = "logs/evolve_log.jsonl"
+    log_file: str | None = "logs/evolve_log.jsonl"
     category: str = "generic"
     use_dynamic_validation: bool = False
     require_validation: bool = True
@@ -83,22 +80,22 @@ class EvolveConfig:
     minimize: bool = True
     xss_live: bool = False
     inject_mode: str = "query"
-    body_template: Optional[str] = None
-    content_type: Optional[str] = None
-    verify_url: Optional[str] = None
+    body_template: str | None = None
+    content_type: str | None = None
+    verify_url: str | None = None
     jitter: float = 0.0
-    user_agent: Optional[str] = None
+    user_agent: str | None = None
     random_ua: bool = False
     fingerprint: bool = True
-    export_tamper: Optional[str] = None
-    proxy: Optional[str] = None
+    export_tamper: str | None = None
+    proxy: str | None = None
     verify_tls: bool = True
-    cookies: Optional[str] = None
+    cookies: str | None = None
     find_all: bool = False
-    report: Optional[str] = None
+    report: str | None = None
 
 
-def _bucket(status: Optional[int]) -> str:
+def _bucket(status: int | None) -> str:
     if status is None:
         return "none"
     if status in (403, 406):
@@ -113,7 +110,7 @@ def _bucket(status: Optional[int]) -> str:
 
 
 class WAFEvolver:
-    def __init__(self, config: EvolveConfig, seed_payloads: List[str]):
+    def __init__(self, config: EvolveConfig, seed_payloads: list[str]):
         self.cfg = config
         self.seed_payloads = seed_payloads
         self.session = requests.Session()
@@ -145,10 +142,10 @@ class WAFEvolver:
         self.baseline_stats: dict = {}
         self.detected_waf = "unknown"
         self._op_weights = None
-        self.findings: List[dict] = []
+        self.findings: list[dict] = []
         self._finding_payloads: set = set()
-        self.best_individual: Optional[Individual] = None
-        self._browser_session: Optional[BrowserSession] = None
+        self.best_individual: Individual | None = None
+        self._browser_session: BrowserSession | None = None
         self._consecutive_429 = 0
         self._requests_made = 0
         self._budget_exhausted = False
@@ -282,7 +279,7 @@ class WAFEvolver:
         with open(self.log_path, "a") as f:
             f.write(json.dumps(entry) + "\n")
 
-    def _init_population(self) -> List[tuple]:
+    def _init_population(self) -> list[tuple]:
         pop = []
         while len(pop) < self.cfg.population_size:
             pop.extend(self.seed_payloads)
@@ -301,7 +298,7 @@ class WAFEvolver:
             "headers": dict(self.session.headers),
         }
 
-    def _evaluate(self, payload: str, source_op: Optional[str] = None) -> Individual:
+    def _evaluate(self, payload: str, source_op: str | None = None) -> Individual:
         if payload in self._cache:
             c = self._cache[payload]
             return Individual(payload, c.fitness, c.reason, c.status_code, c.validated, source_op)
@@ -344,12 +341,12 @@ class WAFEvolver:
         self._cache[payload] = ind
         return ind
 
-    def _select_survivors(self, evaluated: List[Individual]) -> List[Individual]:
+    def _select_survivors(self, evaluated: list[Individual]) -> list[Individual]:
         sorted_pop = sorted(evaluated, key=lambda ind: ind.fitness, reverse=True)
         n = max(2, int(len(evaluated) * self.cfg.survival_ratio))
         return sorted_pop[:n]
 
-    def _breed_next_generation(self, survivors: List[Individual], state: str) -> List[tuple]:
+    def _breed_next_generation(self, survivors: list[Individual], state: str) -> list[tuple]:
         next_gen = [(s.payload, None) for s in survivors]
         while len(next_gen) < self.cfg.population_size:
             p1, p2 = random.sample(survivors, min(2, len(survivors)))

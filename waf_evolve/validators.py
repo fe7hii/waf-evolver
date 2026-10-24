@@ -11,10 +11,9 @@ Three levels:
 3. DYNAMIC - for XSS, renders in a real headless Chromium and observes an
    actual JS dialog firing (requires Playwright).
 """
-import re
-import time
 import difflib
 import logging
+import re
 import urllib.parse
 
 logger = logging.getLogger("waf_evolve.validators")
@@ -33,7 +32,7 @@ _VALID_EVENT_HANDLER = re.compile(
     r"<\s*[a-z][a-z0-9]*\b[^>]*\bon[a-z]+\s*=\s*['\"]?[^'\">]+", re.IGNORECASE
 )
 _VALID_JAVASCRIPT_URI = re.compile(
-    r"(?:href|src)\s*=\s*['\"]?\s*javascript:", re.IGNORECASE
+    r"(?:href|src|formaction)\s*=\s*['\"]?\s*javascript:[^'\">]*"
 )
 _VALID_SVG_ONLOAD = re.compile(
     r"<\s*svg\b[^>]*\bonload\s*=", re.IGNORECASE
@@ -239,6 +238,19 @@ KNOWN_FILE_SIGNATURES = {
         re.compile(r"<\?php"),
         re.compile(r"<\?=\s"),
     ],
+    "boot.ini": [
+        re.compile(r"\[boot loader\]", re.IGNORECASE),
+        re.compile(r"(ntoskrnl\.exe|ntdetect\.com)", re.IGNORECASE),
+    ],
+    "/etc/os-release": [
+        re.compile(r"PRETTY_NAME=", re.IGNORECASE),
+    ],
+    "wp-config.php": [
+        re.compile(r"define\s*\(\s*['\"]?DB_(?:NAME|USER|PASSWORD|HOST)['\"]?", re.IGNORECASE),
+    ],
+    "web.config": [
+        re.compile(r"connectionStrings", re.IGNORECASE),
+    ],
 }
 
 
@@ -264,6 +276,19 @@ SQL_ERROR_SIGNATURES = [
     re.compile(r"near \".*\": syntax error", re.IGNORECASE),
     re.compile(r"Unclosed quotation mark", re.IGNORECASE),
     re.compile(r"quoted string not properly terminated", re.IGNORECASE),
+    # MSSQL: canonical "Msg NNN, Level NN, State N, ... Line N:" header
+    re.compile(r"Msg \d+, Level \d+, State \d+", re.IGNORECASE),
+    re.compile(r"conversion failed when converting", re.IGNORECASE),
+    re.compile(r"string or binary conversion failed", re.IGNORECASE),
+    re.compile(r"incorrect syntax near", re.IGNORECASE),
+    re.compile(r"arithmetic overflow error converting", re.IGNORECASE),
+    re.compile(r"the underlying provider failed on (?:an )?open", re.IGNORECASE),
+    # DB2: "DB2 SQL Error: SQLCODE=-NNN, SQLSTATE=..." and "SQLNNNNn/w/a ..."
+    re.compile(r"DB2 SQL Error", re.IGNORECASE),
+    re.compile(r"SQLCODE\s*=\s*[+-]?\d*[1-9]\d*", re.IGNORECASE),
+    re.compile(r"SQL\d{4}[NWA]", re.IGNORECASE),
+    # MariaDB / MySQL: "The MariaDB server is running with version ..."
+    re.compile(r"(?:mysql|maria)\w* server is running with version", re.IGNORECASE),
 ]
 
 
@@ -326,17 +351,38 @@ def _make_boolean_siblings(logical: str):
 
 
 def _make_time_siblings(logical: str):
-    """Return (fast_variant sleep(0), slow_variant sleep(SLOW)), or None."""
+    """Return (fast_variant, slow_variant) differing only in time cost, or
+    None. Three time constructs are handled, in this order:
+
+    1. sleep(x) / pg_sleep(x) -> x becomes 0 / TIME_SLOW_SEC. This also
+       covers BENCHMARK(N, SLEEP(x)) payloads via their inner sleep.
+    2. MSSQL WAITFOR DELAY 'h:m:s' -> the clause is rewritten to
+       WAITFOR DELAY '0:0:0' / WAITFOR DELAY '0:0:TIME_SLOW_SEC'.
+    3. MySQL BENCHMARK(N, expr) without an inner sleep -> N becomes
+       1 / BENCHMARK_SLOW_N (iteration-count differential).
+    """
     m = re.search(r"(sleep|pg_sleep)\s*\(\s*\d+(\.\d+)?\s*\)", logical, re.IGNORECASE)
-    if not m:
-        return None
-    fast = logical[:m.start()] + re.sub(r"\d+(\.\d+)?", "0", m.group(0), count=1) + logical[m.end():]
-    slow = logical[:m.start()] + re.sub(r"\d+(\.\d+)?", str(TIME_SLOW_SEC), m.group(0), count=1) + logical[m.end():]
-    return fast, slow
+    if m:
+        fast = logical[:m.start()] + re.sub(r"\d+(\.\d+)?", "0", m.group(0), count=1) + logical[m.end():]
+        slow = logical[:m.start()] + re.sub(r"\d+(\.\d+)?", str(TIME_SLOW_SEC), m.group(0), count=1) + logical[m.end():]
+        return fast, slow
+    m = re.search(r"waitfor\s+delay\s*['\"]?\d+(?::\d+)*['\"]?", logical, re.IGNORECASE)
+    if m:
+        return (
+            logical[:m.start()] + "WAITFOR DELAY '0:0:0'" + logical[m.end():],
+            logical[:m.start()] + f"WAITFOR DELAY '0:0:{TIME_SLOW_SEC}'" + logical[m.end():],
+        )
+    m = re.search(r"benchmark\s*\(\s*\d+", logical, re.IGNORECASE)
+    if m:
+        fast = logical[:m.start()] + re.sub(r"\d+", "1", m.group(0), count=1) + logical[m.end():]
+        slow = logical[:m.start()] + re.sub(r"\d+", str(BENCHMARK_SLOW_N), m.group(0), count=1) + logical[m.end():]
+        return fast, slow
+    return None
 
 
 TIME_SLOW_SEC = 3
 TIME_MARGIN_SEC = 1.8
+BENCHMARK_SLOW_N = 10000000
 BOOL_DIFF_MAX_RATIO = 0.95
 
 
@@ -372,8 +418,9 @@ def confirm_sqli_active(prober, payload: str, baseline_stats: dict) -> tuple[boo
             deltas.append(r_slow.elapsed.total_seconds() - r_fast.elapsed.total_seconds())
         if ok and deltas and all(d >= margin for d in deltas):
             avg = sum(deltas) / len(deltas)
-            return True, (f"TIME-BASED blind SQLi confirmed: sleep({TIME_SLOW_SEC}) delayed response "
-                          f"by ~{avg:.2f}s vs sleep(0) across {len(deltas)} trials (margin {margin:.2f}s)")
+            return True, (f"TIME-BASED blind SQLi confirmed: the slow variant of the payload "
+                          f"delayed the response by ~{avg:.2f}s vs the fast variant across "
+                          f"{len(deltas)} trials (margin {margin:.2f}s)")
 
     bool_sib = _make_boolean_siblings(logical)
     if bool_sib:

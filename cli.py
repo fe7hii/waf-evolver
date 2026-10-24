@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from waf_evolve import WAFEvolver, EvolveConfig
+from waf_evolve import EvolveConfig, WAFEvolver
 
 
 def load_seeds(path: str):

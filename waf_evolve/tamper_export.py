@@ -11,7 +11,6 @@ Only operators with a clean, deterministic SQL-tamper analog are exported.
 """
 from pathlib import Path
 
-
 TAMPER_SNIPPETS = {
     "add_sql_comment":        'retVal = retVal.replace(" ", "/**/")',
     "sql_inline_comment_split": 'retVal = retVal.replace(" ", "/**/")',

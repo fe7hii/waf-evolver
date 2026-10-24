@@ -11,7 +11,6 @@ from pathlib import Path
 
 def _curl_repro(cfg, payload: str) -> str:
     url = cfg.target_url
-    method = (cfg.method or "GET").upper()
     mode = cfg.inject_mode
     ua = cfg.user_agent or "Mozilla/5.0"
     base = f"curl -s -A {shlex.quote(ua)}"
@@ -38,7 +37,7 @@ def write_report(path: str, cfg, detected_waf: str, findings: list, top_ops: lis
     total_findings = len(findings)
     shown = findings[:max_items]
     lines = []
-    lines.append(f"# WAF Evolver report")
+    lines.append("# WAF Evolver report")
     lines.append("")
     lines.append(f"- Date: {datetime.now().isoformat(timespec='seconds')}")
     lines.append(f"- Target: `{cfg.target_url}`")
@@ -61,18 +60,18 @@ def write_report(path: str, cfg, detected_waf: str, findings: list, top_ops: lis
         lines.append("")
         lines.append(f"- Validated: **{f.get('validated')}**  |  HTTP status: {f.get('status_code')}  "
                      f"|  score: {f.get('fitness')}")
-        lines.append(f"- Payload:")
+        lines.append("- Payload:")
         lines.append("")
         lines.append("```")
         lines.append(f.get("payload", ""))
         lines.append("```")
         lines.append(f"- Evidence: {f.get('reason', '')}")
-        lines.append(f"- Reproduce:")
+        lines.append("- Reproduce:")
         lines.append("")
         lines.append("```bash")
         lines.append(_curl_repro(cfg, f.get("payload", "")))
         if cfg.verify_url:
-            lines.append(f"# then observe the effect at:")
+            lines.append("# then observe the effect at:")
             lines.append(f"curl -s {cfg.verify_url}")
         lines.append("```")
         lines.append("")
